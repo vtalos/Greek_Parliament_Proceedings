@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import numpy as np
+from datetime import timedelta
 
 
 def remove_father_name(name):
@@ -85,7 +86,7 @@ def add_government_column(df, df_governments):
                            str(row2.date_to.strftime('%d/%m/%Y'))+')'
                     df.at[index1,'government_name'].append(item)
                     matched_to_government = True
-            except:
+            except TypeError:
                 print('PROBLEM: cannot compare government dates and member dates')
                 print(row1.member_start_date, type(row1.member_start_date))
                 print(row2.date_from, type(row2.date_from))
@@ -119,12 +120,22 @@ df_roles = pd.concat([df_gov, df_extra])
 members_to_match = list(set(df_roles['member_name'].to_list())) # unique member names
 
 # Match members from df_roles to df_parl BY NAME AND DATES and find extra parliamentary members
-df_roles['role_start_date'] = pd.to_datetime(df_roles['role_start_date']).dt.date
-df_roles['role_end_date'] = pd.to_datetime(df_roles['role_end_date']).dt.date
+df_roles['role_start_date'] = pd.to_datetime(df_roles['role_start_date'], format='%d/%m/%Y').dt.date
+df_roles['role_end_date'] = pd.to_datetime(df_roles['role_end_date'], format='%d/%m/%Y').dt.date
 df_parl['member_start_date'] = pd.to_datetime(df_parl['member_start_date']).dt.date
 df_parl['member_end_date'] = pd.to_datetime(df_parl['member_end_date']).dt.date
 
 extra_parliamentary = []
+
+# Normalize the parliament member names once, they do not change while matching
+parl_match_data = []
+for index_parl, row_parl in df_parl.iterrows():
+    parl_name = row_parl['member_name_copy']
+    parl_name = re.sub(r'[-()]', ' ', parl_name)
+    parl_name = re.sub(r'\s\s+', ' ', parl_name)
+    parl_parts = [i for i in parl_name.split(' ') if i != '']
+    parl_match_data.append((index_parl, parl_parts,
+                            row_parl['member_start_date'], row_parl['member_end_date']))
 
 c = 0
 
@@ -135,7 +146,7 @@ for index_gov, row_gov in df_roles.iterrows():
     if c % 100 == 0:
         print(c)
 
-    gov_matched_to_parl = False
+    covering_terms = [] # parliamentary terms of the member that cover the role
     gov_name = row_gov['member_name']
     gov_name = re.sub(r'[-()]', ' ', gov_name)
     gov_name = re.sub(r'\s\s+', ' ', gov_name)
@@ -143,11 +154,7 @@ for index_gov, row_gov in df_roles.iterrows():
 
     # if we find a match, we don't break. continue iteration because it might
     # match to more than one periods as formed in the gov files
-    for index_parl, row_parl in df_parl.iterrows():
-        parl_name = row_parl['member_name_copy']
-        parl_name = re.sub(r'[-()]', ' ', parl_name)
-        parl_name = re.sub(r'\s\s+', ' ', parl_name)
-        parl_parts = [i for i in parl_name.split(' ') if i != '']
+    for index_parl, parl_parts, m_s, m_e in parl_match_data:
 
         # Check if gov_parts are all in parl_parts
         # meaning that full names match, regardless of word order
@@ -155,8 +162,6 @@ for index_gov, row_gov in df_roles.iterrows():
 
         # if names matched
         if check:
-            m_s = row_parl['member_start_date']
-            m_e = row_parl['member_end_date']
             r_s = row_gov['role_start_date']
             r_e = row_gov['role_end_date']
 
@@ -164,24 +169,36 @@ for index_gov, row_gov in df_roles.iterrows():
             # if role start in member activity, or role end in member activity
             # or activity in role of large range
             if (r_s>=m_s and r_s<=m_e) or (r_e>=m_s and r_e<=m_e) or (r_s<=m_s and r_e>=m_e):
-                gov_matched_to_parl = True
+                covering_terms.append((m_s, m_e))
                 item = row_gov['role']+'('+str(row_gov['role_start_date'].strftime('%d/%m/%Y')
                                                )+'-'+str(row_gov['role_end_date'].strftime('%d/%m/%Y'))+')'
                 df_parl.at[index_parl, 'roles'].append(item)
 
-    # if df_roles name not in df_parl, it refers to extra parliamentary member
-    if gov_matched_to_parl ==  False:
-        role_item = row_gov['role']+'('+str(row_gov['role_start_date'].strftime('%d/%m/%Y')
-                                               )+'-'+str(row_gov['role_end_date'].strftime('%d/%m/%Y'))+')'
+    ''' The parts of the role that no parliamentary term of the member covers
+        correspond to extra parliamentary service (e.g. a minister assigned
+        before or between his terms), so they get their own activity rows.
+        A role of a member with no term at all is fully extra parliamentary. '''
+    role_item = row_gov['role']+'('+str(row_gov['role_start_date'].strftime('%d/%m/%Y')
+                                           )+'-'+str(row_gov['role_end_date'].strftime('%d/%m/%Y'))+')'
 
-        extra_parliamentary.append([row_gov['member_name'], row_gov['role_start_date']#.strftime('%d/%m/%Y'),
-                                    , row_gov['role_end_date']#.strftime('%d/%m/%Y'),
-                                    , 'εξωκοινοβουλευτικός', np.nan, row_gov['gender'], [role_item]])
+    gap_start = row_gov['role_start_date']
+    for m_s, m_e in sorted(covering_terms):
+        if m_s > gap_start:
+            extra_parliamentary.append([row_gov['member_name'], gap_start,
+                                        m_s - timedelta(days=1),
+                                        'εξωκοινοβουλευτικός', np.nan,
+                                        row_gov['gender'], [role_item]])
+        gap_start = max(gap_start, m_e + timedelta(days=1))
+    if gap_start <= row_gov['role_end_date']:
+        extra_parliamentary.append([row_gov['member_name'], gap_start,
+                                    row_gov['role_end_date'],
+                                    'εξωκοινοβουλευτικός', np.nan,
+                                    row_gov['gender'], [role_item]])
 
 del df_parl['member_name_copy']
 
-df_parl = df_parl.append(pd.DataFrame(data=extra_parliamentary,
-                                      columns=df_parl.columns), ignore_index=True)
+df_parl = pd.concat([df_parl, pd.DataFrame(data=extra_parliamentary,
+                                           columns=df_parl.columns)], ignore_index=True)
 
 df_governments = pd.read_csv('../out_files/governments_1989onwards.csv', encoding='utf-8')
 df_parl = add_government_column(df_parl, df_governments)

@@ -1,8 +1,8 @@
 import re
 import pandas as pd
 
-with open('../out_files/female_names_alternatives_gr.txt', 'r+', encoding = 'utf-8') as f1,\
-     open('../out_files/male_names_alternatives_gr.txt', 'r+', encoding = 'utf-8') as f2:
+with open('../out_files/female_names_alternatives_gr.txt', 'r', encoding = 'utf-8') as f1,\
+     open('../out_files/male_names_alternatives_gr.txt', 'r', encoding = 'utf-8') as f2:
 
     female_list = re.split(r'[,\n\s*]', f1.read())
     male_list = re.split(r'[,\n\s*]', f2.read())
@@ -36,11 +36,11 @@ with open('../out_files/female_names_alternatives_gr.txt', 'r+', encoding = 'utf
             first_name = first_name.split('-')[0]
 
         if first_name in unisex_names:
-            print('check manually case of ', row['member_name', '. The name is unisex.'])
+            print('check manually case of ', row['member_name'], '. The name is unisex.')
         elif first_name in female_list:
-            row['gender'] = 'female'
+            df.at[index, 'gender'] = 'female'
         elif first_name in male_list:
-            row['gender'] = 'male'
+            df.at[index, 'gender'] = 'male'
         else:
             print('Name not categorized in any gender: ', row['member_name'])
 
