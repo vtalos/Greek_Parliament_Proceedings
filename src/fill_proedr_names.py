@@ -1,8 +1,19 @@
 import pandas as pd
 import numpy as np
+from argparse import ArgumentParser
+
+'''The script can also run per batch of the matcher output (the names of the
+chairmen are searched strictly within each sitting), which keeps the memory
+usage low when the record files are processed in batches.'''
+parser = ArgumentParser()
+parser.add_argument("-f", "--infile", default='../out_files/tell_all.csv',
+                    help="csv file created by member_speech_matcher.py")
+parser.add_argument("-o", "--outfile", default='../out_files/tell_all_FILLED.csv',
+                    help="out csv file")
+args = parser.parse_args()
 
 # Input file created by member_speech_matcher.py
-df = pd.read_csv('../out_files/tell_all.csv', encoding='utf-8')
+df = pd.read_csv(args.infile, encoding='utf-8')
 
 # Delete columns not needed for creating reference df_proedr
 subdf = df.copy()
@@ -87,7 +98,7 @@ for index, row in df.iterrows():
     if index%5000 == 0:
         print(index)
 
-df.to_csv('../out_files/tell_all_FILLED.csv', index=False, na_rep=np.nan)
+df.to_csv(args.outfile, index=False, na_rep=np.nan)
 
 print('All NaN proedr cells are: ', str(proedr_nan))
 print('Done')

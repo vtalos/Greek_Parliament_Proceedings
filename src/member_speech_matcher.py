@@ -9,6 +9,7 @@ from datetime import datetime as dt
 from argparse import ArgumentParser
 import pandas as pd
 import ast
+from common import speaker_regex, proedr_regex
 
 
 '''This script extracts speeches from record files and matches them to the
@@ -26,11 +27,11 @@ starttime = dt.now()
 #Cleaning and formatting speakers data
 def text_formatting(text):
     text = re.sub("[():'’`΄‘]",' ', text)
-    text = re.sub('\t+' , ' ', text) #replace one or more tabs with one space
+    text = re.sub(r'\t+' , ' ', text) #replace one or more tabs with one space
     text = text.lstrip() #remove leading spaces
     text = text.rstrip() #remove trailing spaces
-    text = re.sub('\s\s+' , ' ', text) #replace more than one spaces with one space
-    text = re.sub('\s*(-|–)\s*' , '-', text) #fix dashes
+    text = re.sub(r'\s\s+' , ' ', text) #replace more than one spaces with one space
+    text = re.sub(r'\s*(-|–)\s*' , '-', text) #fix dashes
     text = text.lower()
     text = text.translate(str.maketrans('άέόώήίϊΐiύϋΰ','αεοωηιιιιυυυ')) #remove accents
     text = text.translate(str.maketrans('akebyolruxtvhmnz','ακεβυολρυχτνημνζ')) #convert english chars to greek
@@ -104,7 +105,7 @@ def format_speaker_info(speaker_info):
     speaker_info = speaker_info.replace('υφυπ.',' υφυπουργος ')
     speaker_info = speaker_info.replace('υπ.',' υπουργος ')
     speaker_info = speaker_info.replace('&',' και ')
-    speaker_info = re.sub('\s\s+' , ' ', speaker_info) #replace more than one spaces with one space
+    speaker_info = re.sub(r'\s\s+' , ' ', speaker_info) #replace more than one spaces with one space
     speaker_info = speaker_info.lstrip() #remove leading spaces
     speaker_info = speaker_info.rstrip() #remove trailing spaces
     return speaker_info
@@ -113,35 +114,25 @@ def format_speaker_info(speaker_info):
 # compare temp max with similarity of the member's name alternatives with the speaker name
 def compare_with_alternative_sim(speaker_name, member_name, member_surname, temp_max, greek_names):
 
-    # each row in the greek_names data is unique concerning the first name of the row
+    # greek_names is a dict first name -> its alternatives, built once at load time
     # greek_names has only those names that have at least one alternative. so each line has at least two names
-    for line in greek_names:
-
-        name_list = (line.strip()).split(',')
-
-        # if member name has alternatives
-        if name_list[0]==member_name:
-
-            # keep alternatives of the name
-            name_list.remove(member_name)
-
-            for alternative_name in name_list:
-                alternative_sim1 = jellyfish.jaro_winkler_similarity(speaker_name, alternative_name+' '+member_surname)
-                alternative_sim2 = jellyfish.jaro_winkler_similarity(speaker_name, member_surname + ' ' + alternative_name)
-                temp_max = max(temp_max,alternative_sim1, alternative_sim2)
-
-            break #if true, break the for loop and proceed to return temp pax
+    for alternative_name in greek_names.get(member_name, ()):
+        alternative_sim1 = jellyfish.jaro_winkler_similarity(speaker_name, alternative_name+' '+member_surname)
+        alternative_sim2 = jellyfish.jaro_winkler_similarity(speaker_name, member_surname + ' ' + alternative_name)
+        temp_max = max(temp_max,alternative_sim1, alternative_sim2)
 
     return temp_max
 
 
 def get_gov(current_record_datetime):
 
-    df_govs = pd.read_csv('../out_files/governments_1989onwards.csv', encoding='utf-8')
-    df_govs['date_from'] = pd.to_datetime(df_govs['date_from'])#.dt.date
-    df_govs['date_to'] = pd.to_datetime(df_govs['date_to'])#.dt.date
-    df_govs = df_govs.sort_values(by='date_from', ascending=True)
     current_gov_df = df_govs.loc[(df_govs.date_from <= current_record_datetime) & (current_record_datetime < df_govs.date_to)]
+
+    ''' A sitting can be newer than the last crawl of the governments site
+        (whose ongoing government ends on its own crawl date); it belongs to
+        the ongoing government, which is the last row of the table. '''
+    if current_gov_df.shape[0] == 0 and current_record_datetime >= df_govs.date_to.max():
+        current_gov_df = df_govs.tail(1)
 
     if current_gov_df.shape[0] != 1:
         print('problem with ', current_record_datetime)
@@ -312,9 +303,26 @@ f2_path = args.outpath2
 f1 = open(f1_path, 'w+', encoding='utf-8', newline = '')
 
 members_df = pd.read_csv('../out_files/all_members_activity.csv', encoding='utf-8')
+members_df['member_start_date'] = pd.to_datetime(members_df['member_start_date'])
+members_df['member_end_date'] = pd.to_datetime(members_df['member_end_date'])
+# iterating the dataframe once per speaker is too slow, keep a plain list of rows
+members_rows = list(members_df.itertuples(index=False))
 
-fnames = open('../out_files/greek_names_alts_only.txt', 'r+', encoding='utf-8')
-greek_names = fnames.readlines()
+# the governments frame is needed once per record file, prepare it once
+df_govs = pd.read_csv('../out_files/governments_1989onwards.csv', encoding='utf-8')
+df_govs['date_from'] = pd.to_datetime(df_govs['date_from'])#.dt.date
+df_govs['date_to'] = pd.to_datetime(df_govs['date_to'])#.dt.date
+df_govs = df_govs.sort_values(by='date_from', ascending=True)
+
+# map each first name to its alternatives, scanning the file per comparison is too slow
+# each row in the greek_names data is unique concerning the first name of the row,
+# and only the first line of a repeated first name is used
+greek_names = {}
+with open('../out_files/greek_names_alts_only.txt', 'r', encoding='utf-8') as fnames:
+    for line in fnames:
+        name_list = (line.strip()).split(',')
+        if name_list[0] not in greek_names:
+            greek_names[name_list[0]] = name_list[1:]
 
 filenames = sorted([f for f in os.listdir(datapath) if not f.startswith('.')])
 
@@ -324,14 +332,11 @@ record_counter = 0
 
 # REGULAR EXPRESSIONS
 #------------------------------------------
-speaker_regex = re.compile(r"((\s*[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)*\s*(\(.*?\))?\s*\:)")
 caps_nickname_in_parenthesis = re.compile(r"(\([Α-ΩΆ-ΏΪΫΪ́Ϋ́]+\))+") #(ΠΑΝΟΣ)
 lower_nickname_in_parenthesis = re.compile(r"(\([α-ω]{2,}\))") #(πανος)
 text_in_parenthesis = re.compile(r"(\(.*?\)){1}") #(Υπουργός Εσωτερικών)
 
-# Regex for both proedros or proedreuon
-proedr_regex = re.compile(
-    r"(^(((Π+Ρ(Ο|Ό)+(Ε|Έ))|(Ρ(Ο|Ό)+(Ε|Έ)Δ)|(ΠΡ(Ε|Έ)(Ο|Ό))|(ΠΡ(Ο|Ό)Δ)|(Η ΠΡ(Ο|Ό)(Ε|Έ)ΔΡ)|(ΠΡ(Ε|Έ)Δ))|(ΠΡΟΣΩΡΙΝΗ ΠΡΟΕΔΡΟΣ)|(ΠΡΟΣΩΡΙΝΟΣ ΠΡΟΕΔΡΟΣ)))")
+# speaker_regex and proedr_regex come from common.py
 
 # Regex for proedros only
 proedros_regex = re.compile(r"ΠΡ((Ο|Ό|(ΟΟ))(Ε|Έ)|((ΕΟ)|(ΈΟ)|(ΕΌ)|(ΈΌ)))ΔΡΟΣ")
@@ -380,13 +385,17 @@ for filename in filenames:
     record_sitting = re.sub(r"\s\s+",' ',name_parts_cleaned[4].strip())
 
     f3 = open(os.path.join(datapath+filename), 'r', encoding='utf-8')
-    file_content = f3.read().replace('\n', '')
-    file_content = re.sub("\s\s+" , " ", file_content)
+    try:
+        file_content = f3.read().replace('\n', '')
+    except UnicodeDecodeError:
+        # a record that is not valid utf-8 is logged instead of killing the batch
+        prob_files.write('invalid encoding: ' + filename + '\n')
+        f3.close()
+        continue
+    file_content = re.sub(r"\s\s+" , " ", file_content)
 
     # Creates a list of tuples e.g. (' ΠΡΟΕΔΡΕΥΩΝ (Βαΐτσης Αποστολάτος):', ' ΠΡΟΕΔΡΕΥΩΝ', '', '(Βαΐτσης Αποστολάτος)')
-    speakers_groups = re.findall(
-        r"((\s*[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)(\s+\([Α-ΩΆ-Ώα-ωά-ώϊϋΐΰΪΫΪ́Ϋ́-]+\))?(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́]+)?(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)*\s*(\(.*?\))?\s*\:)",
-        file_content)
+    speakers_groups = speaker_regex.findall(file_content)
 
     # Keep only first full match case of findall
     speakers = [speaker[0] for speaker in speakers_groups]
@@ -395,7 +404,7 @@ for filename in filenames:
     # Use split with maxsplit number 1 in order to split at first occurrence
     try:
         file_content = file_content.split(speakers[0], 1)[1]
-    except:
+    except IndexError: #no speaker was detected in the file
         prob_files.write(filename + " \n")
         continue # proceed to next iteration/filename
 
@@ -419,7 +428,10 @@ for filename in filenames:
 
         # Clean speaker
         speaker = speaker.strip()
-        speaker = re.sub("\s\s+", " ", speaker)
+        speaker = re.sub(r"\s\s+", " ", speaker)
+
+        # pagination artifacts of the conversion, glued before the speaker name
+        speaker = re.sub(r"^(ΑΛΛΑΓΗ ΣΕΛΙΔΑΣ( ΛΟΓΩ ΑΛΛΑΓΗΣ ΘΕΜΑΤΟΣ)?\s*(\(ΜΕΤΑ ΤΗ ΔΙΑΚΟΠΗ\))?\s*)+", "", speaker)
 
         speaker_info=np.nan
         speaker_nickname=''
@@ -495,7 +507,7 @@ for filename in filenames:
                 # we remove the standard closing talk of the sitting from the generic members speech
                 if sitting_terminated_regex.search(speech):
                     speech = \
-                    re.split("(μ|Μ)ε\s+(τη|την)\s+(συναινεση|συναίνεση)\s+του\s+((σ|Σ)(ω|ώ)ματος|(τ|Τ)μ(η|ή)ματος)",
+                    re.split(r"(μ|Μ)ε\s+(τη|την)\s+(συναινεση|συναίνεση)\s+του\s+((σ|Σ)(ω|ώ)ματος|(τ|Τ)μ(η|ή)ματος)",
                              speech)[0]
 
                 speaker_info = 'βουλευτης/ες'
@@ -524,15 +536,19 @@ for filename in filenames:
                 speaker_name = text_formatting(speaker)
                 speaker_name = speaker_name_corrections(speaker_name)
 
+                # align with the member side, where '-' becomes a space for
+                # the final comparisons (double first names like κριτων-ηλιας)
+                speaker_name = re.sub(r'\s\s+', ' ', speaker_name.replace('-', ' ')).strip()
+
                 # Remove 1-2 letter characters
                 speaker_name = ' '.join([word for word in speaker_name.split(' ') if len(word) > 2])
 
                 max_sim = 0
 
-                for index, row in members_df.iterrows():
+                for row in members_rows:
 
-                    member_start_date = dt.strptime(row.member_start_date, '%Y-%m-%d')
-                    member_end_date = dt.strptime(row.member_end_date, '%Y-%m-%d')
+                    member_start_date = row.member_start_date
+                    member_end_date = row.member_end_date
 
                     if member_start_date <= current_record_datetime <= member_end_date:
 
@@ -571,18 +587,26 @@ f1.close()
 df = pd.read_csv(f1_path, encoding='utf-8')
 
 # Remove in period column the string part '-presided-parliamentary-republic+'
-df['parliamentary_period'].replace({"-presided-parliamentary-republic_": '_'}, inplace=True, regex=True)
+df['parliamentary_period'] = df['parliamentary_period'].replace(
+    {"-presided-parliamentary-republic_": '_', r"\s+presided parliamentary republic": ''}, regex=True)
 
 # Correct order of sitting date column
-df['sitting_date'].replace({"-presided-parliamentary-republic_": '_'}, inplace=True, regex=True)
+df['sitting_date'] = df['sitting_date'].replace(
+    {"-presided-parliamentary-republic_": '_', r"\s+presided parliamentary republic": ''}, regex=True)
 
 if (df[df.apply(lambda r: r.str.contains('presided').any(), axis=1)]).shape[0] == 0:
     print('Check 3 ok')
 else:
     print('String \'presided\' is still somewhere in the data')
 
-# Replace date '93 with 1993
-df['parliamentary_session'].replace({"'": '19'}, inplace=True, regex=True)
+# Legacy rule of the original pipeline: expand "summer '93" -> "summer 1993".
+# The century 19 was correct for every abbreviated year the 2020-era website
+# produced (only the 90s were abbreviated back then; the published dataset has
+# the correct years everywhere). The site NOW abbreviates the 2000s too
+# ("Θέρος '08"), where this rule would produce 1908 — that case is prevented
+# upstream, in convert2txt.py, which expands the year from the record date
+# before the filename is even composed, so this line is a no-op on new data.
+df['parliamentary_session'] = df['parliamentary_session'].replace({r"'(?=\d{2}(?!\d))": '19'}, regex=True)
 
 # Check if members with nan name have nan roles
 mask = ((df.member_name.isnull()))
