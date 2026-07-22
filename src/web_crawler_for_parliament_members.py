@@ -3,8 +3,8 @@ from bs4 import BeautifulSoup
 import re
 import csv
 import datetime
-from selenium import webdriver
 import time
+from common import get_with_retries, make_session
 
 now = datetime.datetime.now()
 
@@ -13,17 +13,13 @@ with open('../out_files/original_parl_members_data.csv','w+',
 
     csv_writer = csv.writer(original_members_data, delimiter=',')
 
-    _URL = 'http://www.hellenicparliament.gr/Vouleftes/Diatelesantes' \
+    _URL = 'https://www.hellenicparliament.gr/Vouleftes/Diatelesantes' \
            '-Vouleftes-Apo-Ti-Metapolitefsi-Os-Simera/'
 
-    # chromedriver.exe located in the same folder as the script
-    driver = webdriver.Chrome('./chromedriver')
-    time.sleep(5)
-    driver.get(_URL)
-    time.sleep(5) #page load time
-    html = driver.page_source
+    session = make_session()
+
+    html = get_with_retries(session, _URL).text
     soup = BeautifulSoup(html, "html.parser")
-    time.sleep(2)
 
     #Get dropdown list
     members_dropdown = soup.find("select", id="ctl00_ContentPlaceHolder1_dmps_mpsListId")
@@ -40,19 +36,15 @@ with open('../out_files/original_parl_members_data.csv','w+',
 
     for link, member in members_links.items():
 
-        if member!='' and member!=' Επιλέξτε Βουλευτή':
+        if member!='' and member!=' Επιλέξτε Βουλευτή' and member!=' Βουλευτής':
 
             member_counter+=1
-            if member_counter%50==0:
-                time.sleep(15)
             print(str(member_counter)+' from '+str(len(members_links)-1))
             print("Name: ",member)
             member_URL = _URL+'?MpId='+link
             print("Processing page ",member_URL,"\n")
 
-            driver.get(member_URL)
-            time.sleep(3)
-            html = driver.page_source
+            html = get_with_retries(session, member_URL).text
             soup_member = BeautifulSoup(html, "html.parser")
 
             #if the page has no table
@@ -71,7 +63,7 @@ with open('../out_files/original_parl_members_data.csv','w+',
                     if '-)' in period:
 
                         # for example Period:ΙΖ΄(20/09/2015-) means it continues up to today
-                        period = re.sub('-\)', '-'+ now.strftime("%d/%m/%Y")+')', period)
+                        period = re.sub(r'-\)', '-'+ now.strftime("%d/%m/%Y")+')', period)
 
                     date = td_columns[1]
                     date = re.sub(r"\s+", "", date)
@@ -93,4 +85,4 @@ with open('../out_files/original_parl_members_data.csv','w+',
                                          'Parliamentary-Party:'+parliamentary_party,
                                          'Description:'+description])
 
-    driver.close()
+            time.sleep(0.5)

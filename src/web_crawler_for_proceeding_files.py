@@ -2,11 +2,13 @@
 from bs4 import BeautifulSoup
 import time
 import os
-import shutil
+import re
 import codecs
-from selenium import webdriver
-import ntpath
+import csv
+import hashlib
 import urllib.parse
+from datetime import datetime as dt
+from common import get_with_retries, make_session
 
 def create_target_path(target_data_folder, tr, entry_counter, ext):
 
@@ -25,56 +27,65 @@ def create_target_path(target_data_folder, tr, entry_counter, ext):
 
     return(target_path)
 
-def download_file(driver, downloaded_data_folder, file_URL, target_path):
+def download_file(session, file_URL, target_path, manifest_writer):
 
-    element = driver.find_element_by_xpath('//a[@href="' + file_URL + '"]')
-    driver.execute_script("arguments[0].scrollIntoView();", element)
-    element.click()
+    response = get_with_retries(session, file_URL)
 
-    # wait for full download
-    time.sleep(7)
+    # write to a temporary name first, so that an interrupted download does
+    # not leave a partial file that the resume check would take as complete
+    with open(target_path + '.part', 'wb') as f:
+        f.write(response.content)
+    os.replace(target_path + '.part', target_path)
 
-    downloaded_file_path = os.path.join(downloaded_data_folder, ntpath.basename(file_URL))
-
-    #unquote: decode url to match downloaded filename (often in cases with Greek letters in filename)
-    shutil.copy(urllib.parse.unquote(downloaded_file_path), target_path)  # copy and rename file
+    # provenance record, so that every file can be verified against the source
+    manifest_writer.writerow([os.path.basename(target_path), file_URL,
+                              dt.now().strftime('%Y-%m-%d %H:%M:%S'),
+                              hashlib.sha256(response.content).hexdigest()])
 
 domain = "https://www.hellenicparliament.gr"
 _URL = 'https://www.hellenicparliament.gr/Praktika/Synedriaseis-Olomeleias?pageNo='
 url_part = "/UserFiles/"
 entry_counter = 0 #counter number is included to the name of each file
 
-downloaded_data_folder = '../original_data_download_folder/'
-if not os.path.exists(downloaded_data_folder):
-    os.makedirs(downloaded_data_folder)
-
 target_data_folder = '../original_data/'
 if not os.path.exists(target_data_folder):
     os.makedirs(target_data_folder)
 
-# set preferred download folder
-chromeOptions = webdriver.ChromeOptions()
-prefs = {"profile.default_content_settings.popups": 0,
-         "download.default_directory" : os.path.abspath(downloaded_data_folder),
-         "directory_upgrade": True}
-chromeOptions.add_experimental_option("prefs",prefs)
+session = make_session()
 
-# chromedriver.exe located in the same folder as the script
-driver = webdriver.Chrome('./chromedriver', options=chromeOptions)
+# keys of already downloaded files (ignoring the counter part), to allow resuming
+downloaded = set()
+for f in os.listdir(target_data_folder):
+    parts = os.path.splitext(f)[0].split('_')
+    if len(parts) >= 5:
+        downloaded.add((parts[0],) + tuple(parts[2:]))
 
-#Open a file in order to write down the rows with no files
-with codecs.open('../out_files/rows_with_no_files.txt','w+', encoding='utf-8') as no_files:
+# Find the last page of the listing from the pagination links
+html = get_with_retries(session, _URL+'1').text
+soup = BeautifulSoup(html, "html.parser")
+last_page = max(int(m.group(1)) for m in
+                (re.search(r'pageNo=(\d+)', link['href'])
+                 for link in soup.find_all('a', href=True)) if m)
+print('The listing has', last_page, 'pages')
+
+#Open a file in order to write down the rows with no files,
+#and the download manifest with the provenance of every file
+manifest_path = '../out_files/download_manifest.csv'
+new_manifest = not os.path.exists(manifest_path)
+with codecs.open('../out_files/rows_with_no_files.txt','w+', encoding='utf-8') as no_files, \
+     open(manifest_path, 'a', encoding='utf-8', newline='') as manifest_file:
+
+    manifest_writer = csv.writer(manifest_file)
+    if new_manifest:
+        manifest_writer.writerow(['filename', 'url', 'downloaded_at', 'sha256'])
 
     # Choose range of pages
-    for pageNo in range (100,0,-1):
+    for pageNo in range (last_page,0,-1):
 
-        print('Sleeping 5 seconds')
         page_URL = _URL+str(pageNo)
         print("Processing page",pageNo,"\n")
-        driver.get(page_URL)
-        time.sleep(5)
+        html = get_with_retries(session, page_URL).text
 
-        html = driver.page_source
         soup = BeautifulSoup(html, "html.parser")
         trs = soup.find("tbody").find_all("tr", {"class":["odd", "even"]})
 
@@ -109,18 +120,25 @@ with codecs.open('../out_files/rows_with_no_files.txt','w+', encoding='utf-8') a
                     file_ext = 'doc'
                 elif "pdf" in (ext.lower() for ext in files.keys()):
                     file_ext = 'pdf'
+                else:
+                    # links found, but none of them in a usable format
+                    no_files.write('Page ' + str(pageNo) + " and date " + tr.find(
+                        'td').getText() + " \n")
+                    print('File not found')
+                    continue
 
-                file_URL = files[file_ext]
+                file_URL = urllib.parse.urljoin(domain, files[file_ext])
                 print("File url: ", file_URL)
 
                 target_path = create_target_path(target_data_folder, tr, entry_counter, file_ext)
 
-                download_file(driver, downloaded_data_folder, file_URL, target_path)
+                parts = os.path.splitext(os.path.basename(target_path))[0].split('_')
+                if (parts[0],) + tuple(parts[2:]) in downloaded:
+                    print('Already downloaded')
+                    continue
 
-            # Add sleeping time for the script every 50 files
-            if ((entry_counter != 0) and ((entry_counter % 100) == 0)):
-                print("Let's sleep for 3 minutes...")
-                time.sleep(180)
-                print("Up and running again...")
+                download_file(session, file_URL, target_path, manifest_writer)
 
-driver.close()
+                time.sleep(1)
+
+        time.sleep(1)

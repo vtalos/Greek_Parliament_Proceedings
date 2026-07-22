@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
-import requests
 import pandas as pd
 from datetime import datetime as dt
 import datetime
 import re
+import time
 from bs4 import BeautifulSoup
 from bs4.element import Comment
 from collections import defaultdict
+from common import get_with_retries, make_session, text_formatting
 
 
 def toDatetime(date):
 
     if date == 'ΣΗΜΕΡΑ':
-        date = datetime.date.today()
+        date = dt.combine(datetime.date.today(), dt.min.time())
     else:
         day, month, year = re.split(r'[\.\/-]', date)
         date = dt.strptime(year+'-'+month+'-'+day, '%Y-%m-%d')
@@ -72,13 +73,13 @@ def soup_to_list(soup):
     return[re.sub(r'\s{2,}', ' ', t) for t in visible_texts if t.strip()!='']
 
 
-def df_from_gov_table(page_URL):
+def df_from_gov_table(session, page_URL):
 
-    response = requests.get(page_URL)
+    response = get_with_retries(session, page_URL)
     html = response.text
     soup = BeautifulSoup(html, "html.parser")
     trs = soup.find("tbody").find_all('tr')
-    trs = trs[1:] #skip header
+    trs = [tr for tr in trs if tr.find('a')] #skip header/empty rows
 
     rows_list = []
 
@@ -90,26 +91,11 @@ def df_from_gov_table(page_URL):
     df_govs = pd.DataFrame(columns=['id', 'gov_name', 'date_from', 'date_to', 'gov_url'], data=rows_list)
     df_govs = df_govs.drop(['id'], axis=1)
 
-    df_govs.date_from = df_govs.date_from.apply(lambda x: toDatetime(x))
-    df_govs.date_to = df_govs.date_to.apply(lambda x: toDatetime(x))
-    df_govs.gov_name = df_govs.gov_name.apply(lambda x: x.lower())
+    df_govs.date_from = df_govs.date_from.apply(lambda x: toDatetime(x.strip()))
+    df_govs.date_to = df_govs.date_to.apply(lambda x: toDatetime(x.strip()))
+    df_govs.gov_name = df_govs.gov_name.apply(lambda x: re.sub(r'\s+', ' ', x).strip().lower())
 
     return df_govs
-
-
-def text_formatting(text):
-
-    text = re.sub("['’`΄‘́̈]",'', text)
-    text = re.sub('\t+' , ' ', text)
-    text = text.lstrip()
-    text = text.rstrip()
-    text = re.sub('\s\s+' , ' ', text)
-    text = re.sub('\s*(-|–)\s*' , '-', text) #fix dashes
-    text = text.lower()
-    text = text.translate(str.maketrans('άέόώήίϊΐiύϋΰ','αεοωηιιιιυυυ')) #remove accents
-    text = text.translate(str.maketrans('akebyolruxtvhmnz','ακεβυολρυχτνημνζ')) #convert english characters to greek
-
-    return text
 
 
 def balanced_parenthesis(myStr):
@@ -117,9 +103,9 @@ def balanced_parenthesis(myStr):
     for char in myStr:
         if char == '(' or char == ')':
             stack.append(char)
-    open = [char for char in stack if char == '(']
-    close = [char for char in stack if char == ')']
-    if len(open) != len(close):
+    opens = [char for char in stack if char == '(']
+    closes = [char for char in stack if char == ')']
+    if len(opens) != len(closes):
         return False
     else:
         return True
@@ -148,8 +134,25 @@ def correct_separation(content):
             correct_parenthesis.append(new_item)
             new_item = ''
 
-    # Remove [1] or [ι]
-    content = [c for c in correct_parenthesis if (c.strip()!='[1]' and c.strip()!='[ι]')]
+    # Remove footnote markers like [1], [2] or [ι]
+    content = [c for c in correct_parenthesis if not re.fullmatch(r'\[(\d+|ι)\]', c.strip())]
+
+    # Merge fragments wrongly split by the site markup:
+    # stray single letters ('26','ι','ουνιου 2023...'), day plus month initial
+    # ('28 μ','αρτιου 2024...') and event types split after the colon
+    # ('28 ιουλιου 2023:','παραιτηση (...)')
+    merged_letters = []
+    for c in reversed(content):
+        stripped = c.strip()
+        if merged_letters and ((len(stripped) == 1 and stripped.isalpha())
+                               or re.fullmatch(r'\d+\s+[α-ω]', stripped)):
+            merged_letters[-1] = stripped + merged_letters[-1]
+        elif merged_letters and stripped.endswith(':') and \
+                re.match(r'(διορισμος|παραιτηση|παυση|απεβιωσε)', merged_letters[-1].strip()):
+            merged_letters[-1] = stripped + ' ' + merged_letters[-1]
+        else:
+            merged_letters.append(c)
+    content = list(reversed(merged_letters))
 
     # Merge wrongly split strings
     merged_items = []
@@ -243,11 +246,10 @@ def remove_gov_info(content):
 
 def clean_up_soup(soup):
 
-    # Remove not needed content. Cannot choose specific div because of malformed html
-    soup.find("footer", {"class": "footer"}).decompose()
-    soup.find("div", {"class": "comments"}).decompose()
-    soup.find("header", {"class": "entry-header"}).decompose()
-    soup.find("head").decompose()
+    # Keep only the post content (site redesign wrapped it in an Elementor widget)
+    soup = soup.find("div", {"class": "elementor-widget-theme-post-content"})
+    if soup is None:
+        return None
 
     # Replace span tag with its contents to avoid unwanted text separation
     for match in soup.find_all('span'):
@@ -289,8 +291,11 @@ def correct_interwined_entries(members, roles):
 
     return m1, m2, r1, r2
 
-page_URL = 'https://gslegal.gov.gr/?page_id=776&sort=time'
-df_govs = df_from_gov_table(page_URL)
+page_URL = 'https://gslegal.gov.gr/kyvernisi/istorika-stoixeia/'
+
+session = make_session()
+
+df_govs = df_from_gov_table(session, page_URL)
 df_1989_onwards = df_govs[df_govs.date_to >= dt.strptime('1989-07-03', '%Y-%m-%d')]
 
 df_1989_onwards.to_csv('../out_files/governments_1989onwards.csv', header=True, index=False, encoding='utf-8')
@@ -302,23 +307,21 @@ has_digit_regex = re.compile(r'\d+')
 #For specific data correction: υπηρεσιακη κυβερνηση βασιλικης σπ. θανου-χριστοφιλου "27 αυγουστου 2015"
 endswith_month_regex = re.compile(r'\s(ιανουαριου|φεβρουαριου|μαρτιου|απριλιου|μαιου|ιουνιου|ιουλιου|αυγουστου|'
                                   r'σεπτεμβριου|οκτωβριου|νομεβριου|δεκεμβριου)$')
-activity = defaultdict(list)
-all_cases = []
-
-months = []
-types = []
-
 rows_list = []
 
 for index, row in df_1989_onwards.iterrows():
     print('Collecting data from government \"', row.gov_name, '\"')
 
-    html = requests.get(row.gov_url+'&print=1').text
+    time.sleep(0.5)
+    html = get_with_retries(session, row.gov_url).text
     html = html.replace(u'\xa0', ' ')
     html = html.replace(u' ', ' ')
     soup = BeautifulSoup(html, "html.parser")
 
     soup = clean_up_soup(soup)
+    if soup is None:
+        print('No content found for government "', row.gov_name, '", skipping')
+        continue
 
     # Start formatting content
     content = soup_to_list(soup)
