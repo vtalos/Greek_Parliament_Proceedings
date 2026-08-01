@@ -1,3 +1,7 @@
+# Runtime: Python 3.9+ (the Docker image pins 3.11). convert2txt.py additionally
+# needs a Java runtime (default-jre-headless) and src/tika-app-1.20.jar, which is
+# not a pip package and not tracked in git — the Dockerfile provides the JRE and
+# expects the jar to be present in the build context.
 beautifulsoup4==4.15.0
 jellyfish==1.2.1
 numpy==2.0.2

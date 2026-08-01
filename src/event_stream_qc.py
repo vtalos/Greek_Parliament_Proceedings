@@ -18,6 +18,9 @@ parser = ArgumentParser()
 parser.add_argument("-f", "--events_folder", help="folder with the jsonl event files")
 parser.add_argument("-o", "--outfile", default='../out_files/event_stream_qc.csv',
                     help="path for the qc report csv")
+parser.add_argument("--fail-on-suspect", action="store_true",
+                    help="exit with a non-zero status if any sitting is flagged suspect, "
+                         "so an automated run can gate on it (the report is written first)")
 args = parser.parse_args()
 
 filenames = sorted(f for f in os.listdir(args.events_folder) if f.endswith('.jsonl'))
@@ -82,3 +85,6 @@ for r in suspects[:30]:
     print(' ', r[4], '->', r[-1], '(speeches:', r[5], ', notes:', r[7], ')')
 if len(suspects) > 30:
     print('  ...and', len(suspects) - 30, 'more, see', args.outfile)
+
+if args.fail_on_suspect and suspects:
+    raise SystemExit(1)

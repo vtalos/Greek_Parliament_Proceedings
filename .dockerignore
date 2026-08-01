@@ -1,0 +1,28 @@
+# keep the ~16 GB of data out of the build context; the container regenerates
+# only the new sittings at run time
+original_data/
+_data/
+_data_sample/
+_batches/
+tell_all_batches/
+tell_all_raw_batches/
+events/
+events_enriched/
+events_test/
+_data_evtest/
+
+# large generated outputs (the registries and name lists under out_files/ are
+# small and tracked, so they are intentionally NOT excluded)
+out_files/tell_all*.csv
+out_files/event_stream_qc.csv
+out_files/unmatched_event_speakers.csv
+out_files/download_manifest.csv
+Greek_Parliament_Proceedings_1989_2026.csv
+Greek_Parliament_Proceedings_2020_2026.csv
+*.csv.bak
+
+# vcs / tooling
+.git/
+.venv/
+__pycache__/
+*.pyc

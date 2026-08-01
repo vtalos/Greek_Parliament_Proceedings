@@ -7,6 +7,7 @@ import codecs
 import csv
 import hashlib
 import urllib.parse
+from argparse import ArgumentParser
 from datetime import datetime as dt
 from common import get_with_retries, make_session
 
@@ -47,7 +48,20 @@ _URL = 'https://www.hellenicparliament.gr/Praktika/Synedriaseis-Olomeleias?pageN
 url_part = "/UserFiles/"
 entry_counter = 0 #counter number is included to the name of each file
 
-target_data_folder = '../original_data/'
+parser = ArgumentParser(description=
+    "Download the plenary proceeding record files from the Hellenic Parliament site.")
+parser.add_argument("--since", default=None,
+                    help="only download sittings whose date is strictly after this ISO "
+                         "date (YYYY-MM-DD). Lets an incremental run skip the historical "
+                         "archive without needing it on disk; normally set to the latest "
+                         "sitting_date already stored downstream.")
+parser.add_argument("-o", "--out", default='../original_data/',
+                    help="folder to download the record files into")
+parser.add_argument("--manifest", default='../out_files/download_manifest.csv',
+                    help="provenance manifest csv (appended to)")
+args = parser.parse_args()
+
+target_data_folder = args.out
 if not os.path.exists(target_data_folder):
     os.makedirs(target_data_folder)
 
@@ -70,7 +84,7 @@ print('The listing has', last_page, 'pages')
 
 #Open a file in order to write down the rows with no files,
 #and the download manifest with the provenance of every file
-manifest_path = '../out_files/download_manifest.csv'
+manifest_path = args.manifest
 new_manifest = not os.path.exists(manifest_path)
 with codecs.open('../out_files/rows_with_no_files.txt','w+', encoding='utf-8') as no_files, \
      open(manifest_path, 'a', encoding='utf-8', newline='') as manifest_file:
@@ -133,6 +147,11 @@ with codecs.open('../out_files/rows_with_no_files.txt','w+', encoding='utf-8') a
                 target_path = create_target_path(target_data_folder, tr, entry_counter, file_ext)
 
                 parts = os.path.splitext(os.path.basename(target_path))[0].split('_')
+                # incremental watermark: parts[0] is the sitting date (YYYY-MM-DD),
+                # which sorts correctly as an ISO string. Skipping here, after the
+                # entry counter has advanced, keeps filenames identical to a full crawl.
+                if args.since and parts[0] <= args.since:
+                    continue
                 if (parts[0],) + tuple(parts[2:]) in downloaded:
                     print('Already downloaded')
                     continue
