@@ -9,7 +9,7 @@ from datetime import datetime as dt
 from argparse import ArgumentParser
 import pandas as pd
 import ast
-from common import speaker_regex, proedr_regex
+from common import speaker_regex, proedr_regex, fix_speaker_lines
 
 
 '''This script extracts speeches from record files and matches them to the
@@ -386,7 +386,7 @@ for filename in filenames:
 
     f3 = open(os.path.join(datapath+filename), 'r', encoding='utf-8')
     try:
-        file_content = f3.read().replace('\n', '')
+        file_content = fix_speaker_lines(f3.read()).replace('\n', '')
     except UnicodeDecodeError:
         # a record that is not valid utf-8 is logged instead of killing the batch
         prob_files.write('invalid encoding: ' + filename + '\n')

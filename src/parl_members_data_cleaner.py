@@ -405,8 +405,8 @@ for start, end in [('1996-09-22', '2000-03-14'), ('2000-04-09', '2004-02-11'),
     independencies, deaths) with the election date 25/06/2023 instead of the
     date the event took place, which corrupts the terms of the members below
     (zero-length, overlapping or impossible terms). Their period Κ΄ terms are
-    rebuilt here with the dates of the parliamentary record and the press
-    (see NOTES.md). None is used for the terms that are still running.'''
+    rebuilt here with the dates of the parliamentary record and the press.
+    None is used for the terms that are still running.'''
 period_k_corrections = {
     'κωνσταντινοπουλος κωνσταντινου οδυσσεας': ('αρκαδιας', [
         ('2023-06-25', '2026-03-12', 'πασοκ - κινημα αλλαγης'),

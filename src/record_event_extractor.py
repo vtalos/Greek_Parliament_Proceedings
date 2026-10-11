@@ -3,7 +3,8 @@ import os
 import re
 import json
 from argparse import ArgumentParser
-from common import speaker_regex, proedr_regex
+from common import speaker_regex, proedr_regex, fix_speaker_lines
+from party_wings import note_wings
 
 '''This script converts each record file into a stream of events: one json
 line per event, in the order they appear in the record. Event types:
@@ -15,7 +16,8 @@ line per event, in the order they appear in the record. Event types:
               the speaker matching to official members happens downstream
 - stage_note: a parenthetical note of the stenographers, with its full text
               (e.g. which wing applauded or protested), classified by keywords,
-              anchored to the speech it occurred in and its position in it
+              anchored to the speech it occurred in and its position in it;
+              the reaction notes also get the reacting wing(s) as party keys
 
 The speeches are segmented with the same speaker regular expression as
 member_speech_matcher.py, so that the speech view of the stream stays
@@ -61,6 +63,9 @@ stage_note_subtypes = [
     ('pagination_artifact', r'αλλαγη σελιδας'), # tika conversion artifact
 ]
 
+# the notes whose wing is recorded (see party_wings.py)
+reaction_subtypes = ('applause', 'protest', 'noise', 'laughter')
+
 chair_flag_regexes = [
     ('call_to_order', r'ανακαλ(έσ|ειτ|εστ)|στην τάξη'),
     ('withdraw_request', r'αποσύρετε|να αποσύρ|ανακαλέστε'),
@@ -88,7 +93,7 @@ for counter, filename in enumerate(filenames, 1):
 
     name_parts = os.path.splitext(filename)[0].split('_')
     try:
-        raw = open(os.path.join(args.data_folder, filename), 'r', encoding='utf-8').read()
+        raw = fix_speaker_lines(open(os.path.join(args.data_folder, filename), 'r', encoding='utf-8').read())
     except UnicodeDecodeError:
         # a record that is not valid utf-8 is logged instead of killing the run
         print('WARNING: invalid encoding, skipping', filename)
@@ -190,10 +195,16 @@ for counter, filename in enumerate(filenames, 1):
 
         notes = []
         for pm in parenthetical_regex.finditer(speech_raw):
-            notes.append({'type': 'stage_note',
-                          'subtype': classify_note(pm.group(1)),
-                          'text': normalize(pm.group(1)),
-                          'offset_in_speech': pm.start()})
+            note = {'type': 'stage_note',
+                    'subtype': classify_note(pm.group(1)),
+                    'text': normalize(pm.group(1)),
+                    'offset_in_speech': pm.start()}
+            # the wing(s) that reacted, as party keys of party_wings.py
+            if note['subtype'] in reaction_subtypes:
+                wings = note_wings(note['text'])
+                if wings:
+                    note['wings'] = wings
+            notes.append(note)
 
         speech_text = normalize(parenthetical_regex.sub(' ', speech_raw))
 

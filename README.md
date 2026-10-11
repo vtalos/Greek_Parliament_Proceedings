@@ -1,7 +1,7 @@
 # Greek Parliament Proceedings, 1989–2026
 
 A complete, verifiable dataset of the plenary proceedings of the Hellenic Parliament:
-**1,533,886 speeches from 6,443 sittings**, spanning every sitting from the 1st one of
+**1,550,252 speeches from 6,443 sittings**, spanning every sitting from the 1st one of
 July 3rd, 1989 up to today — plus a new **event-stream layer** that captures what
 datasets of parliamentary speech usually throw away: applause (with the wing that
 applauded), protests, laughter, chair interventions, agenda headers and sitting times.
@@ -14,8 +14,8 @@ parliament website, fixes a number of bugs found along the way (several of which
 affect the published dataset — all documented), rebuilds the never-published input
 files, and re-runs everything from scratch. The output was validated per year and per
 sitting against the published dataset before extending beyond it: of its 5,224
-sittings, 5,220 are reproduced here, several previously lost sittings and speakers
-are recovered, and every divergence is explained in [NOTES.md](NOTES.md).
+sittings, 5,220 are reproduced here, and several previously lost sittings and speakers
+are recovered.
 
 ## The main dataset
 
@@ -47,13 +47,15 @@ in record order, with a sequence number:
   chair-action flags (calls to order, requests to withdraw, strike-from-record)
 - `stage_note` — the stenographers' parentheticals with full text, classified
   (applause/protest/noise/laughter/time-bell/voting/inaudible/…) and anchored to the
-  exact position inside the speech where they occurred
+  exact position inside the speech where they occurred; reaction notes also carry the
+  reacting wing(s) as party keys (`wings`, see `src/party_wings.py`)
 - `header` — agenda/section headings; roll-call name catalogues are collapsed into
   single `name_list` events
 
-Across the corpus: ~1.63M speech events (90.7% matched to a member), ~360k stage
-notes — including ~150k applause events with wing attribution — making this, to our
-knowledge, the richest resource of parliamentary reactions available for Greek.
+Across the corpus: ~1.65M speech events (90.7% matched to a member), ~600k stage
+notes — including ~122k applause events, 96.5% of them with the applauding wing —
+making this, to our knowledge, the richest resource of parliamentary reactions
+available for Greek.
 
 ## Provenance and quality control
 
@@ -65,9 +67,6 @@ knowledge, the richest resource of parliamentary reactions available for Greek.
 - `out_files/unmatched_event_speakers.csv` (regenerated per run): every unmatched
   speaker with its speech count — nothing is dropped silently; unmatched speeches
   keep their raw speaker name in the event stream.
-- [NOTES.md](NOTES.md): every code change, every upstream bug found (with evidence),
-  every source gap (missing 1995, broken-font PDFs of 1996–2003, mis-dated events of
-  the current period on the parliament site) and every manual correction.
 
 ## Pipeline
 

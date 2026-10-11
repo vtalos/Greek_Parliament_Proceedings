@@ -5,20 +5,50 @@ import time
 '''Κοινές βοηθητικές συναρτήσεις των υπόλοιπων scripts.
 
 Shared helpers that used to be copy-pasted across the scripts. Everything here
-is byte-identical to the copies it replaces, so the pipeline output is
-unchanged. Note that member_speech_matcher.py keeps its own text_formatting:
-it is a different variant and must stay that way.
+was byte-identical to the copies it replaced; the speaker detection was
+corrected afterwards (October 2026). Note that
+member_speech_matcher.py keeps its own text_formatting: it is a different
+variant and must stay that way.
 '''
 
 # REGULAR EXPRESSIONS
 #------------------------------------------
-# speaker detection, shared by member_speech_matcher.py and record_event_extractor.py
+# speaker detection, shared by member_speech_matcher.py and record_event_extractor.py.
+# The closing parenthesis of the speaker (role, or chair name) has no colon and no
+# other parenthesis inside, except one opening bracket for nicknames like
+# "ΦΩΤΕΙΝΗ (ΦΩΦΗ ΓΕΝΝΗΜΑΤΑ (Πρόεδρος ...):". The original pattern (\(.*?\)) was
+# unbounded: a missing colon or parenthesis made it swallow the text up to the
+# next "):", which put ~6.6% of the text of the records into speaker names.
+# A nickname in capitals may also follow the first names, e.g.
+# "ΣΠΥΡΙΔΩΝ - ΠΑΝΑΓΙΩΤΗΣ (ΣΠΗΛΙΟΣ) ΛΙΒΑΝΟΣ:", which the old pattern only caught
+# through the unbounded parenthesis.
 speaker_regex = re.compile(
-    r"((\s*[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)(\s+\([Α-ΩΆ-Ώα-ωά-ώϊϋΐΰΪΫΪ́Ϋ́-]+\))?(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́]+)?(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)*\s*(\(.*?\))?\s*\:)")
+    r"((\s*[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+)(\s+\([Α-ΩΆ-Ώα-ωά-ώϊϋΐΰΪΫΪ́Ϋ́-]+\))?(\s+[Α-ΩΆ-ΏΪΫΪ́Ϋ́]+)?"
+    r"(\s+(?:[Α-ΩΆ-ΏΪΫΪ́Ϋ́-]+|\([Α-ΩΆ-ΏΪΫΪ́Ϋ́]+\)))*\s*"
+    r"(\([^:()]{0,150}(?:\([^:()]{0,150})?\))?\s*\:)")
+
+# Speaker lines that end with a period instead of a colon, at the start of a line
+# ("ΒΙΡΓΙΝΙΑ ΤΣΟΥΔΕΡΟΥ. Κύριε Πρόεδρε,"), mostly in the records of 1989-1994:
+# at least two words in capitals, an optional parenthesis, and a sentence after.
+period_speaker_line_regex = re.compile(
+    r"^([ \t]*[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]+[Α-ΩΆ-ΏΪΫ-]{2,})+(?:[ \t]*\([^():\n]{1,150}\))?)\."
+    r"(?=[ \t]+[Α-ΩΆ-Ώ«\"'][α-ωά-ώ])", re.M)
+# Chair lines with an unclosed parenthesis ("ΠΡΟΕΔΡΕΥΩΝ (Αναστάσιος Νεράντζης: ...")
+unclosed_chair_regex = re.compile(
+    r"((?:ΠΡΟΕΔΡ[Α-ΩΆ-Ώ]*|ΠΡΟΣΩΡΙΝ[Α-Ω]+ ΠΡΟΕΔΡΟΣ)\s*\([^():\n]{3,60}):")
 
 # Regex for both proedros or proedreuon
 proedr_regex = re.compile(
     r"(^(((Π+Ρ(Ο|Ό)+(Ε|Έ))|(Ρ(Ο|Ό)+(Ε|Έ)Δ)|(ΠΡ(Ε|Έ)(Ο|Ό))|(ΠΡ(Ο|Ό)Δ)|(Η ΠΡ(Ο|Ό)(Ε|Έ)ΔΡ)|(ΠΡ(Ε|Έ)Δ))|(ΠΡΟΣΩΡΙΝΗ ΠΡΟΕΔΡΟΣ)|(ΠΡΟΣΩΡΙΝΟΣ ΠΡΟΕΔΡΟΣ)))")
+
+
+def fix_speaker_lines(raw):
+    '''Turns the two malformed kinds of speaker lines into the normal
+    "NAME (role):" form, on the text of a record with its line breaks still in
+    place. Both pipelines call it right after reading a record, so that they keep
+    segmenting the speeches identically.'''
+    raw = period_speaker_line_regex.sub(r"\1:", raw)
+    return unclosed_chair_regex.sub(r"\1):", raw)
 
 
 def make_session():

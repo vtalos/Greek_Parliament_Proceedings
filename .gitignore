@@ -22,3 +22,5 @@ out_files/problems_b*
 out_files/unmatched_event_speakers.csv
 out_files/event_stream_qc.csv
 *.bak
+_rebuild/
+__pycache__/
