@@ -31,11 +31,25 @@ speaker_regex = re.compile(
 # ("ΒΙΡΓΙΝΙΑ ΤΣΟΥΔΕΡΟΥ. Κύριε Πρόεδρε,"), mostly in the records of 1989-1994:
 # at least two words in capitals, an optional parenthesis, and a sentence after.
 period_speaker_line_regex = re.compile(
-    r"^([ \t]*[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]+[Α-ΩΆ-ΏΪΫ-]{2,})+(?:[ \t]*\([^():\n]{1,150}\))?)\."
+    r"^([ \t]*[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]+[Α-ΩΆ-ΏΪΫ-]+)*[ \t]+[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]*\([^():\n]{1,150}\))?)\."
     r"(?=[ \t]+[Α-ΩΆ-Ώ«\"'][α-ωά-ώ])", re.M)
 # Chair lines with an unclosed parenthesis ("ΠΡΟΕΔΡΕΥΩΝ (Αναστάσιος Νεράντζης: ...")
 unclosed_chair_regex = re.compile(
     r"((?:ΠΡΟΕΔΡ[Α-ΩΆ-Ώ]*|ΠΡΟΣΩΡΙΝ[Α-Ω]+ ΠΡΟΕΔΡΟΣ)\s*\([^():\n]{3,60}):")
+# Chair lines of one word ending with a period ("ΠΡΟΕΔΡΕΥΩΝ . Ο κ. Υπουργός έχει το λόγο."),
+# mostly 1989-1993; the chair name is filled in later by fill_proedr_names.py
+period_chair_line_regex = re.compile(
+    r"^([ \t]*(?:ΠΡΟΕΔΡ[Α-ΩΆ-Ώ]*|ΠΡΟΣΩΡΙΝ[Α-Ω]+ ΠΡΟΕΔΡΟΣ)(?:[ \t]*\([^():\n]{1,80}\))?)[ \t]*\."
+    r"(?=[ \t]+[Α-ΩΆ-Ώ«\"'])", re.M)
+# Initials inside speaker names ("ΚΩΝΣΤΑΝΤΙΝΟΣ ΑΧ. ΚΑΡΑΜΑΝΛΗΣ:"): the period stopped the
+# speaker regex, which then kept only the surname. The period becomes a space; the
+# matcher drops words of one or two letters anyway.
+initial_in_speaker_regex = re.compile(
+    r"^([ \t]*[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]+[Α-ΩΆ-ΏΪΫ-]+)*[ \t]+[Α-ΩΪΫ]{1,3})\."
+    r"(?![ \t]*ΠΡΟ(?:ΕΔΡ|ΣΩΡΙΝ))(?=[ \t]*[Α-ΩΆ-ΏΪΫ-]{2,}(?:[ \t]+(?:[Α-ΩΆ-ΏΪΫ-]+|\([Α-ΩΆ-ΏΪΫ]+\)))*[ \t]*(?:\(|:))", re.M)
+# Latin capitals inside Greek words in capitals ("ΠΡΟΕΔΡEΥΩΝ", "ΔΗΜΗΤΡIOΣ")
+mixed_caps_regex = re.compile(r"\b[Α-ΩΆ-ΏΪΫA-Z]*(?:[Α-ΩΆ-ΏΪΫ][A-Z]|[A-Z][Α-ΩΆ-ΏΪΫ])[Α-ΩΆ-ΏΪΫA-Z]*\b")
+latin_to_greek = str.maketrans('ABEHIKMNOPTXYZ', 'ΑΒΕΗΙΚΜΝΟΡΤΧΥΖ')
 
 # Regex for both proedros or proedreuon
 proedr_regex = re.compile(
@@ -47,7 +61,10 @@ def fix_speaker_lines(raw):
     "NAME (role):" form, on the text of a record with its line breaks still in
     place. Both pipelines call it right after reading a record, so that they keep
     segmenting the speeches identically.'''
+    raw = mixed_caps_regex.sub(lambda m: m.group(0).translate(latin_to_greek), raw)
+    raw = initial_in_speaker_regex.sub(r"\1 ", raw)
     raw = period_speaker_line_regex.sub(r"\1:", raw)
+    raw = period_chair_line_regex.sub(r"\1:", raw)
     return unclosed_chair_regex.sub(r"\1):", raw)
 
 

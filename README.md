@@ -1,7 +1,7 @@
 # Greek Parliament Proceedings, 1989–2026
 
 A complete, verifiable dataset of the plenary proceedings of the Hellenic Parliament:
-**1,550,252 speeches from 6,443 sittings**, spanning every sitting from the 1st one of
+**1,559,045 speeches from 6,443 sittings**, spanning every sitting from the 1st one of
 July 3rd, 1989 up to today — plus a new **event-stream layer** that captures what
 datasets of parliamentary speech usually throw away: applause (with the wing that
 applauded), protests, laughter, chair interventions, agenda headers and sitting times.
@@ -52,7 +52,7 @@ in record order, with a sequence number:
 - `header` — agenda/section headings; roll-call name catalogues are collapsed into
   single `name_list` events
 
-Across the corpus: ~1.65M speech events (90.7% matched to a member), ~600k stage
+Across the corpus: ~1.65M speech events (91.1% matched to a member), ~600k stage
 notes — including ~122k applause events, 96.5% of them with the applauding wing —
 making this, to our knowledge, the richest resource of parliamentary reactions
 available for Greek.

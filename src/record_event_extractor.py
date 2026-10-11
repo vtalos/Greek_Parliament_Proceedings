@@ -85,6 +85,40 @@ def normalize(text):
     return re.sub(r'\s\s+', ' ', text).strip()
 
 
+def clean_speech(speech_raw, matches):
+    '''The speech text without its parentheticals (each replaced by a space, then
+    normalized), and the position in that text where each parenthetical stood.
+    offset_in_speech refers to the raw speech; this position refers to the
+    "text" field, so that a note can be placed between the sentences of the text.'''
+    parts = []
+    positions = []
+    last = 0
+    length = 0
+    for m in matches:
+        parts.append(speech_raw[last:m.start()])
+        length += m.start() - last
+        positions.append(length)
+        parts.append(' ')
+        length += 1
+        last = m.end()
+    parts.append(speech_raw[last:])
+    pre = ''.join(parts)
+    text = normalize(pre)
+    # map each position through the collapse of whitespace runs and the strip
+    runs = [(r.start(), r.end()) for r in re.finditer(r'\s\s+', pre)]
+    leading = 1 if pre[:1].isspace() else 0
+    offsets = []
+    removed = 0
+    k = 0
+    for p in positions:
+        while k < len(runs) and runs[k][1] <= p:
+            removed += runs[k][1] - runs[k][0] - 1
+            k += 1
+        partial = max(0, p - runs[k][0] - 1) if k < len(runs) and runs[k][0] < p else 0
+        offsets.append(max(0, min(len(text), p - removed - partial - leading)))
+    return text, offsets
+
+
 filenames = sorted(f for f in os.listdir(args.data_folder) if not f.startswith('.'))
 
 for counter, filename in enumerate(filenames, 1):
@@ -193,20 +227,22 @@ for counter, filename in enumerate(filenames, 1):
         # pagination artifacts of the conversion, glued before the speaker name
         speaker_raw = re.sub(r"^(ΑΛΛΑΓΗ ΣΕΛΙΔΑΣ( ΛΟΓΩ ΑΛΛΑΓΗΣ ΘΕΜΑΤΟΣ)?\s*(\(ΜΕΤΑ ΤΗ ΔΙΑΚΟΠΗ\))?\s*)+", "", speaker_raw)
 
+        matches = list(parenthetical_regex.finditer(speech_raw))
+        speech_text, text_offsets = clean_speech(speech_raw, matches)
+
         notes = []
-        for pm in parenthetical_regex.finditer(speech_raw):
+        for pm, text_offset in zip(matches, text_offsets):
             note = {'type': 'stage_note',
                     'subtype': classify_note(pm.group(1)),
                     'text': normalize(pm.group(1)),
-                    'offset_in_speech': pm.start()}
+                    'offset_in_speech': pm.start(),
+                    'offset_in_text': text_offset}
             # the wing(s) that reacted, as party keys of party_wings.py
             if note['subtype'] in reaction_subtypes:
                 wings = note_wings(note['text'])
                 if wings:
                     note['wings'] = wings
             notes.append(note)
-
-        speech_text = normalize(parenthetical_regex.sub(' ', speech_raw))
 
         speech_event = {'type': 'speech',
                         'speaker_raw': speaker_raw,
